@@ -1,0 +1,62 @@
+name: CI
+
+# test: lint + unit/integration tests on every push and PR (no secrets needed:
+#       mongomock, scripted LLM). deploy: on main, after tests pass, trigger the
+#       Render deploy hook. eval: manual only, because it spends OpenAI tokens.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      run_eval:
+        description: "Run the smoke eval against Atlas + OpenAI (spends tokens)"
+        type: boolean
+        default: false
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+      - run: uv sync --frozen
+      - run: uv run ruff check src tests evals scripts
+      - run: uv run ruff format --check src tests evals scripts
+      - run: uv run pytest -q
+
+  deploy:
+    needs: test
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Render deploy
+        run: curl --fail --silent --show-error -X POST "${{ secrets.RENDER_DEPLOY_HOOK_URL }}"
+
+  eval:
+    needs: test
+    if: github.event_name == 'workflow_dispatch' && inputs.run_eval
+    runs-on: ubuntu-latest
+    env:
+      MONGO_URI: ${{ secrets.MONGO_URI }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      ACCESS_CODES: ci-eval-code
+      MAX_RUNS_PER_DAY: "500"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+      - run: uv sync --frozen
+      - name: Start the app
+        run: |
+          uv run uvicorn app.main:create_app --factory --port 8000 &
+          for i in $(seq 1 30); do curl -sf http://127.0.0.1:8000/health/ready && break; sleep 2; done
+      - run: uv run python -m evals.run retrieval --smoke
+      - run: uv run python -m evals.run decisions --smoke
+      - uses: actions/upload-artifact@v4
+        with:
+          name: eval-reports
+          path: evals/reports/

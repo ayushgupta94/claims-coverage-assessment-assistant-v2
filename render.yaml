@@ -1,0 +1,37 @@
+﻿# Render Blueprint: one free Docker web service.
+# Deploys are triggered by CI (deploy hook) after tests pass, not on every push.
+# Secrets marked `sync: false` are entered once in the Render dashboard.
+services:
+  - type: web
+    name: claims-coverage-assistant
+    runtime: docker
+    plan: free
+    dockerfilePath: ./docker/Dockerfile
+    dockerContext: .
+    healthCheckPath: /health/live
+    autoDeploy: false
+    envVars:
+      - key: ENVIRONMENT
+        value: production
+      - key: LOG_LEVEL
+        value: INFO
+      - key: MONGO_DB_NAME
+        value: claims_assistant_v2
+      - key: OPENAI_MODEL
+        value: gpt-4o-mini
+      - key: RETRIEVAL_MODE
+        value: hybrid
+      - key: MAX_RUNS_PER_DAY
+        value: "50"
+      - key: MONGO_URI
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: ACCESS_CODES
+        sync: false
+      - key: LANGFUSE_PUBLIC_KEY
+        sync: false
+      - key: LANGFUSE_SECRET_KEY
+        sync: false
+      - key: LANGFUSE_BASE_URL
+        sync: false

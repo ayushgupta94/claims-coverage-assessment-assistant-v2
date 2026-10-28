@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+.venv/
+.env
+.idea/
+.vscode/
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+.DS_Store
+notes.md
+PITCH.md
+INTERVIEW_GUIDE.md

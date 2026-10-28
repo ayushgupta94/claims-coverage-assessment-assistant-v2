@@ -1,0 +1,30 @@
+[
+  {
+    "policy_id": "POL-AUTO-1001",
+    "customer_id": "CUST-001",
+    "product_version_id": "AUTO-GOLD-V1",
+    "sum_insured": 800000,
+    "inception_date": "2024-01-15T00:00:00Z"
+  },
+  {
+    "policy_id": "POL-AUTO-1002",
+    "customer_id": "CUST-004",
+    "product_version_id": "AUTO-GOLD-V1",
+    "sum_insured": 1200000,
+    "inception_date": "2023-04-01T00:00:00Z"
+  },
+  {
+    "policy_id": "POL-HEALTH-2001",
+    "customer_id": "CUST-002",
+    "product_version_id": "HEALTH-PREMIUM-V1",
+    "sum_insured": 500000,
+    "inception_date": "2023-06-01T00:00:00Z"
+  },
+  {
+    "policy_id": "POL-HOME-3001",
+    "customer_id": "CUST-003",
+    "product_version_id": "HOME-STANDARD-V1",
+    "sum_insured": 1200000,
+    "inception_date": "2024-03-10T00:00:00Z"
+  }
+]

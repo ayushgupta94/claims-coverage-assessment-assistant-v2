@@ -1,0 +1,26 @@
+[
+  {
+    "product_version_id": "AUTO-GOLD-V1",
+    "product_id": "AUTO-GOLD",
+    "policy_type": "auto",
+    "excluded_claim_types": ["racing", "commercial_use"],
+    "waiting_period_days": 15,
+    "wording_pdf": "policies/auto_gold_v1.pdf"
+  },
+  {
+    "product_version_id": "HEALTH-PREMIUM-V1",
+    "product_id": "HEALTH-PREMIUM",
+    "policy_type": "health",
+    "excluded_claim_types": ["cosmetic_procedure"],
+    "waiting_period_days": 90,
+    "wording_pdf": "policies/health_premium_v1.pdf"
+  },
+  {
+    "product_version_id": "HOME-STANDARD-V1",
+    "product_id": "HOME-STANDARD",
+    "policy_type": "home",
+    "excluded_claim_types": ["war", "nuclear"],
+    "waiting_period_days": 0,
+    "wording_pdf": "policies/home_standard_v1.pdf"
+  }
+]

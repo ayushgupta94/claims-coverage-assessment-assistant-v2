@@ -1,0 +1,8 @@
+[
+  {"claim_id": "HIST-AUTO-1001-1", "policy_id": "POL-AUTO-1001", "customer_id": "CUST-001", "claim_type": "collision", "description": "Minor collision in a parking lot", "amount": 45000, "incident_date": "2024-05-01T00:00:00Z", "filed_at": "2024-05-02T00:00:00Z", "status": "approved"},
+  {"claim_id": "HIST-AUTO-1001-2", "policy_id": "POL-AUTO-1001", "customer_id": "CUST-001", "claim_type": "theft", "description": "Vehicle stolen overnight, recovered with damage", "amount": 120000, "incident_date": "2024-08-18T00:00:00Z", "filed_at": "2024-08-19T00:00:00Z", "status": "approved"},
+  {"claim_id": "HIST-AUTO-1002-1", "policy_id": "POL-AUTO-1002", "customer_id": "CUST-004", "claim_type": "collision", "description": "Side-swiped on the highway", "amount": 60000, "incident_date": "2024-01-10T00:00:00Z", "filed_at": "2024-01-11T00:00:00Z", "status": "approved"},
+  {"claim_id": "HIST-AUTO-1002-2", "policy_id": "POL-AUTO-1002", "customer_id": "CUST-004", "claim_type": "vandalism", "description": "Windows smashed while parked", "amount": 30000, "incident_date": "2024-03-05T00:00:00Z", "filed_at": "2024-03-06T00:00:00Z", "status": "approved"},
+  {"claim_id": "HIST-AUTO-1002-3", "policy_id": "POL-AUTO-1002", "customer_id": "CUST-004", "claim_type": "collision", "description": "Rear bumper damaged reversing", "amount": 25000, "incident_date": "2024-04-20T00:00:00Z", "filed_at": "2024-04-21T00:00:00Z", "status": "approved"},
+  {"claim_id": "HIST-HEALTH-2001-1", "policy_id": "POL-HEALTH-2001", "customer_id": "CUST-002", "claim_type": "hospitalization", "description": "Planned surgery, in-patient admission", "amount": 85000, "incident_date": "2024-02-09T00:00:00Z", "filed_at": "2024-02-10T00:00:00Z", "status": "approved"}
+]

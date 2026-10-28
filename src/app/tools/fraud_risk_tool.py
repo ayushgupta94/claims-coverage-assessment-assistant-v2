@@ -58,9 +58,12 @@ async def score_fraud_risk(
     # exclude_claim_id is required here: this claim was already persisted
     # (status=submitted) before this tool runs, so without excluding it,
     # a claim would count itself in its own frequency signal.
+    # The window also ends at this claim's filing: claims filed later (or at
+    # the same instant) are not its history. Otherwise a claim's score would
+    # keep changing as newer claims arrive, and could not be reproduced.
     history = await claim_repository.get_history_for_policy(claim.policy_id, exclude_claim_id=claim.claim_id)
     cutoff = claim.filed_at - timedelta(days=settings.fraud_frequency_lookback_days)
-    history = [h for h in history if h.filed_at >= cutoff]
+    history = [h for h in history if cutoff <= h.filed_at < claim.filed_at]
 
     score = 0.0
     signals: list[str] = []

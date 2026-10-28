@@ -2,14 +2,23 @@
 
 Kept free of FastAPI so the same use cases can be driven from HTTP, a CLI or
 the eval runner. Each claim is one workflow thread (thread_id = claim_id).
+
+Submission is asynchronous: `submit` validates, stores the claim as
+`submitted` and starts the assessment as a background task, so the caller gets
+an answer in milliseconds and polls the claim for the result. A run that
+raises marks the claim `failed`; a run cut off by a shutdown leaves it
+`submitted`, and `resume_interrupted` runs it again on the next startup.
 """
 
 from __future__ import annotations
+
+import asyncio
 
 from langgraph.types import Command
 
 from app.config import Settings
 from app.core.exceptions import (
+    AppError,
     ClaimNotFoundError,
     ClaimValidationError,
     ConflictError,
@@ -21,7 +30,7 @@ from app.core.tracing import observe
 from app.db.repositories.claim_repository import ClaimRepository
 from app.db.repositories.policy_repository import PolicyRepository
 from app.db.repositories.usage_repository import UsageRepository
-from app.domain.models import ClaimRecord, ClaimRequest, ClaimStatus, ReviewRequest
+from app.domain.models import ClaimRecord, ClaimRequest, ClaimStatus, HistoryEntry, ReviewRequest
 
 logger = get_logger(__name__)
 
@@ -41,6 +50,7 @@ class ClaimAssessmentService:
         self._policies = policy_repository
         self._usage = usage_repository
         self._settings = settings
+        self._tasks: set[asyncio.Task] = set()  # strong refs, so running tasks aren't garbage-collected
 
     async def submit(self, claim: ClaimRequest) -> ClaimRecord:
         claim_id_var.set(claim.claim_id)
@@ -59,9 +69,48 @@ class ClaimAssessmentService:
             "claim_submitted",
             extra={"ctx_claim_type": claim.claim_type, "ctx_description_chars": len(claim.description)},
         )
-        with observe("claim_assessment", as_type="agent", input={"claim_id": claim.claim_id}):
-            await self._workflow.ainvoke({"claim": claim.model_dump(mode="json")}, _thread(claim.claim_id))
+        self._start_assessment(claim)
         return await self._claims.get_record(claim.claim_id)
+
+    async def resume_interrupted(self) -> int:
+        """Re-runs claims a restart left `submitted` (their daily-cap run was
+        already counted). Returns how many were resumed."""
+        records = await self._claims.list_records(status=ClaimStatus.SUBMITTED, limit=1000)
+        for record in records:
+            claim = record.claim
+            entry = HistoryEntry(actor="system", action="requeued", reason="Assessment was interrupted by a restart.")
+            await self._claims.requeue(claim.claim_id, entry)
+            self._start_assessment(claim)
+        if records:
+            logger.info("assessments_resumed", extra={"ctx_count": len(records)})
+        return len(records)
+
+    async def drain(self, timeout: float | None = None) -> None:
+        """Waits for running assessments. Any still running after `timeout` are
+        cancelled; they stay `submitted` and are resumed on the next startup."""
+        if not self._tasks:
+            return
+        _, pending = await asyncio.wait(set(self._tasks), timeout=timeout)
+        for task in pending:
+            task.cancel()
+        await asyncio.gather(*pending, return_exceptions=True)
+
+    def _start_assessment(self, claim: ClaimRequest) -> None:
+        task = asyncio.create_task(self._assess(claim), name=f"assess-{claim.claim_id}")
+        self._tasks.add(task)
+        task.add_done_callback(self._tasks.discard)
+
+    async def _assess(self, claim: ClaimRequest) -> None:
+        # The task runs in a copy of the submitting request's context, so its
+        # logs keep that request_id.
+        claim_id_var.set(claim.claim_id)
+        try:
+            with observe("claim_assessment", as_type="agent", input={"claim_id": claim.claim_id}):
+                await self._workflow.ainvoke({"claim": claim.model_dump(mode="json")}, _thread(claim.claim_id))
+        except Exception as exc:
+            logger.exception("assessment_failed")
+            reason = exc.message if isinstance(exc, AppError) else "Unexpected error during assessment."
+            await self._claims.mark_failed(claim.claim_id, HistoryEntry(actor="system", action="failed", reason=reason))
 
     async def review(self, claim_id: str, review: ReviewRequest) -> ClaimRecord:
         claim_id_var.set(claim_id)

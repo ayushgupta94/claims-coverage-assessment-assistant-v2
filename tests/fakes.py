@@ -19,12 +19,14 @@ class FakeLLM:
         self._script = list(script)
         self._injection_verdict = injection_verdict
         self.agent_calls = 0
+        self.last_messages: list = []
 
     async def generate(self, messages, *, tools=None, response_format=None, purpose="agent") -> LLMResponse:
         if purpose == "injection_classifier":
             verdict = InjectionVerdict(is_injection=self._injection_verdict, reason="scripted")
             return LLMResponse(parsed=verdict, usage=USAGE)
         self.agent_calls += 1
+        self.last_messages = list(messages)
         return self._script.pop(0)
 
 
@@ -73,7 +75,15 @@ def make_claim(**overrides) -> ClaimRequest:
 
 
 def tool_call(name: str, arguments: dict) -> LLMResponse:
-    return LLMResponse(tool_calls=[ToolCall(id=f"call-{name}", name=name, arguments=arguments)], usage=USAGE)
+    return tool_calls((name, arguments))
+
+
+def tool_calls(*calls: tuple[str, dict]) -> LLMResponse:
+    """One agent turn that requests several tools at once."""
+    return LLMResponse(
+        tool_calls=[ToolCall(id=f"call-{name}", name=name, arguments=arguments) for name, arguments in calls],
+        usage=USAGE,
+    )
 
 
 def final_answer(claim_id: str = "CLAIM-1", outcome: str = "covered", clause_ids=("AUTO-GOLD-V1-2.1",)) -> LLMResponse:

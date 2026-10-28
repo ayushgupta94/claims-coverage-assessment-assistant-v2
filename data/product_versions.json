@@ -3,6 +3,7 @@
     "product_version_id": "AUTO-GOLD-V1",
     "product_id": "AUTO-GOLD",
     "policy_type": "auto",
+    "covered_claim_types": ["collision", "theft", "natural_calamity", "fire", "vandalism", "third_party_liability"],
     "excluded_claim_types": ["racing", "commercial_use"],
     "waiting_period_days": 15,
     "wording_pdf": "policies/auto_gold_v1.pdf"
@@ -11,6 +12,7 @@
     "product_version_id": "HEALTH-PREMIUM-V1",
     "product_id": "HEALTH-PREMIUM",
     "policy_type": "health",
+    "covered_claim_types": ["hospitalization", "day_care", "ambulance", "organ_donor"],
     "excluded_claim_types": ["cosmetic_procedure"],
     "waiting_period_days": 90,
     "wording_pdf": "policies/health_premium_v1.pdf"
@@ -19,6 +21,7 @@
     "product_version_id": "HOME-STANDARD-V1",
     "product_id": "HOME-STANDARD",
     "policy_type": "home",
+    "covered_claim_types": ["fire", "water_damage", "flood", "storm", "burglary", "theft", "earthquake", "glass_breakage"],
     "excluded_claim_types": ["war", "nuclear"],
     "waiting_period_days": 0,
     "wording_pdf": "policies/home_standard_v1.pdf"

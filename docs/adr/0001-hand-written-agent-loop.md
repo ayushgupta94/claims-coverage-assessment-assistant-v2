@@ -10,11 +10,18 @@ abstractions for prompts, tools, memory and control flow.
 ## Decision
 The ReAct loop is about 60 lines of plain Python in `agent/orchestrator.py`:
 call the LLM with strict tool schemas, execute requested tools over MCP, feed
-results back, stop at a structured answer or after six iterations.
+results back, stop at a structured answer or after six iterations. The tool
+calls of one turn are independent, so they run concurrently (`asyncio.gather`,
+results returned in call order); the injection classifier runs alongside the
+loop because it only adds a flag.
 
 ## Consequences
 - Every step is visible and testable with a scripted fake LLM (`tests/fakes.py`).
 - Guardrails (tool-argument checks), timing, logging and fallbacks sit exactly
   where they are needed, without framework hooks.
+- Concurrency is two explicit `asyncio` calls, tested with fakes that only
+  finish if the calls overlap.
 - Features a framework would give for free (streaming, memory, multi-agent
-  routing) would have to be built if ever needed. None are needed today.
+  routing) would have to be built if ever needed. None are needed today:
+  token streaming in particular would show the model's proposal before the
+  decision policy has checked it, and the rules can still overrule it.

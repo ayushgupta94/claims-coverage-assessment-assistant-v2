@@ -134,6 +134,17 @@ async def eval_chunking(cases: list[dict]) -> None:
 
 
 # ---------------------------------------------------------------------------
+async def wait_for_assessment(client: httpx.AsyncClient, response: httpx.Response, timeout: float = 120) -> dict:
+    """Polls the claim (202 Location) until its background assessment finishes."""
+    deadline = time.perf_counter() + timeout
+    while time.perf_counter() < deadline:
+        record = (await client.get(response.headers["Location"])).json()
+        if record["status"] != "submitted":
+            return record
+        await asyncio.sleep(0.5)
+    return record
+
+
 async def eval_decisions(cases: list[dict], base_url: str) -> None:
     """Submits every case to the running app, then deletes it again so cases
     don't add to each other's claim-history (fraud frequency) signal."""
@@ -148,12 +159,13 @@ async def eval_decisions(cases: list[dict], base_url: str) -> None:
             claim_id = f"EVAL-{case['id']}-{run_tag}"
             started = time.perf_counter()
             response = await client.post("/claims", json={**case["claim"], "claim_id": claim_id})
-            latency = time.perf_counter() - started
+            record = await wait_for_assessment(client, response) if response.status_code == 202 else None
+            latency = time.perf_counter() - started  # submit -> final status, as a user waits for it
             await mongo.db["claims"].delete_one({"claim_id": claim_id})
-            if response.status_code != 201:
-                print(f"{case['id']}: HTTP {response.status_code} {response.text[:200]}")
+            if record is None or record["decision"] is None:
+                final = record and record["status"]
+                print(f"{case['id']}: HTTP {response.status_code} {response.text[:200]} final={final}")
                 continue
-            record = response.json()
             decision = record["decision"]
             results.append({"case": case, "decision": decision, "usage": record["usage"], "latency": latency})
             print(

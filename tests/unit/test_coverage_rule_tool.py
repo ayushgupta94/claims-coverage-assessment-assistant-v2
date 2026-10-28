@@ -29,6 +29,7 @@ def make_product_version(**overrides) -> PolicyProductVersion:
         product_version_id="AUTO-GOLD-V1",
         product_id="AUTO-GOLD",
         policy_type="auto",
+        covered_claim_types=["collision", "theft"],
         excluded_claim_types=["racing"],
         waiting_period_days=15,
     )
@@ -144,3 +145,38 @@ async def test_missing_product_version_raises_not_found(repos):
 
     with pytest.raises(PolicyNotFoundError):
         await check_coverage_rules(claim_repo, policy_repo, CoverageRuleCheckInput(claim_id=claim.claim_id))
+
+
+async def check(repos, *, product_version=None, **claim_overrides):
+    policy_repo, claim_repo = repos
+    await _seed(policy_repo, product_version=product_version)
+    claim = make_claim(**claim_overrides)
+    await claim_repo.create_claim(claim)
+    return await check_coverage_rules(claim_repo, policy_repo, CoverageRuleCheckInput(claim_id=claim.claim_id))
+
+
+async def test_a_peril_the_policy_does_not_insure_is_not_covered(repos):
+    # A car collision on a home policy: nothing excludes it, but nothing insures it either.
+    home = make_product_version(product_id="HOME-STANDARD", covered_claim_types=["fire", "water_damage"])
+    result = await check(repos, product_version=home, claim_type="collision")
+
+    assert result.is_covered is False
+    assert result.violated_rules == [
+        "claim_type 'collision' is not an insured peril under HOME-STANDARD (covers: fire, water_damage)"
+    ]
+
+
+async def test_an_excluded_type_reports_only_the_exclusion(repos):
+    result = await check(repos, claim_type="racing")
+    assert result.violated_rules == ["claim_type 'racing' is explicitly excluded by the policy"]
+
+
+async def test_claim_types_are_matched_case_and_space_insensitively(repos):
+    assert (await check(repos, claim_type=" Collision")).is_covered is True
+    assert (await check(repos, claim_type="RACING", claim_id="CLAIM-2")).is_covered is False
+
+
+async def test_a_product_without_insured_perils_configured_fails_closed(repos):
+    result = await check(repos, product_version=make_product_version(covered_claim_types=[]))
+    assert result.is_covered is False
+    assert "none configured" in result.violated_rules[0]

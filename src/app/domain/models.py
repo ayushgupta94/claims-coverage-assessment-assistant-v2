@@ -30,6 +30,9 @@ class PolicyProductVersion(BaseModel):
     product_version_id: str
     product_id: str
     policy_type: str = Field(description="e.g. 'auto', 'health', 'home'")
+    covered_claim_types: list[str] = Field(
+        default_factory=list, description="insured perils (the wording's Scope of Cover); anything else is not covered"
+    )
     excluded_claim_types: list[str] = Field(default_factory=list)
     waiting_period_days: int = 0
 
@@ -98,10 +101,11 @@ class RetrievedSection(BaseModel):
 # Claims
 # --------------------------------------------------------------------------
 class ClaimStatus(StrEnum):
-    SUBMITTED = "submitted"
+    SUBMITTED = "submitted"  # accepted; the assessment is running in the background
     UNDER_REVIEW = "under_review"
     APPROVED = "approved"
     REJECTED = "rejected"
+    FAILED = "failed"  # the assessment raised an error; see the audit trail
 
 
 class ClaimRequest(BaseModel):
@@ -165,6 +169,7 @@ class ToolStep(BaseModel):
     arguments: dict
     ok: bool
     latency_ms: int
+    started_ms: int = Field(default=0, description="ms after the agent run started; overlapping steps ran concurrently")
     error: str | None = None
 
 
@@ -222,6 +227,10 @@ class CoverageDecision(BaseModel):
     citations: list[Citation] = Field(default_factory=list)
     dropped_citations: list[str] = Field(default_factory=list, description="cited by the LLM but never retrieved")
     confidence_score: float = Field(ge=0.0, le=1.0)
+    confidence_breakdown: dict[str, float] = Field(
+        default_factory=dict, description="each evidence term's weighted share of confidence_score"
+    )
+    llm_outcome: CoverageOutcome | None = Field(default=None, description="what the model proposed; None on fallback")
     fraud_risk: FraudRiskResult
     coverage_rules: CoverageRuleResult
     requires_human_review: bool
@@ -237,7 +246,9 @@ class HistoryEntry(BaseModel):
 
     at: datetime = Field(default_factory=_utcnow)
     actor: str  # "agent", "system" or the reviewer's name
-    action: Literal["assessed", "auto_approved", "auto_rejected", "escalated", "approved", "overridden"]
+    action: Literal[
+        "assessed", "auto_approved", "auto_rejected", "escalated", "approved", "overridden", "failed", "requeued"
+    ]
     outcome: CoverageOutcome | None = None
     reason: str = ""
     model: str | None = None

@@ -39,6 +39,12 @@ az containerapp create -g claims-rg -n claims-app --environment claims-env \
              OPENAI_API_KEY=secretref:openai-key ACCESS_CODES=secretref:access-codes
 ```
 
+Keep `--max-replicas 1`: assessments run as background tasks inside the web
+process and interrupted ones are resumed on startup, which assumes a single
+instance (see [ADR 0006](adr/0006-async-submission-with-polling.md)). Seed and
+ingest against the same `MONGO_URI` as in the README, and run
+`scripts/reset_demo.py --yes` before a demo.
+
 If the GHCR package is private, add `--registry-server ghcr.io --registry-username <user>
 --registry-password <PAT with read:packages>`. Point the health probe at
 `/health/live`.

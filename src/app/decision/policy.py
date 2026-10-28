@@ -34,14 +34,28 @@ WEIGHT_CITATIONS = 0.20
 WEIGHT_FRAUD = 0.15
 
 
+def confidence_components(
+    *, agrees_with_rules: bool, top_retrieval_score: float, citation_validity: float, fraud_score: float
+) -> dict[str, float]:
+    """Each evidence term's weighted contribution; together they make the confidence."""
+    return {
+        "rules_agreement": WEIGHT_AGREEMENT * (1.0 if agrees_with_rules else 0.0),
+        "retrieval_match": WEIGHT_RETRIEVAL * top_retrieval_score,
+        "citation_validity": WEIGHT_CITATIONS * citation_validity,
+        "low_fraud_risk": WEIGHT_FRAUD * (1.0 - fraud_score),
+    }
+
+
 def compute_confidence(
     *, agrees_with_rules: bool, top_retrieval_score: float, citation_validity: float, fraud_score: float
 ) -> float:
-    score = (
-        WEIGHT_AGREEMENT * (1.0 if agrees_with_rules else 0.0)
-        + WEIGHT_RETRIEVAL * top_retrieval_score
-        + WEIGHT_CITATIONS * citation_validity
-        + WEIGHT_FRAUD * (1.0 - fraud_score)
+    score = sum(
+        confidence_components(
+            agrees_with_rules=agrees_with_rules,
+            top_retrieval_score=top_retrieval_score,
+            citation_validity=citation_validity,
+            fraud_score=fraud_score,
+        ).values()
     )
     return round(min(max(score, 0.0), 1.0), 3)
 
@@ -92,12 +106,13 @@ def decide(
     citation_validity = len(valid_ids) / len(cited) if cited else 0.0
     vector_scores = [clause.vector_score for clause in run.retrieved.values() if clause.vector_score is not None]
 
-    confidence = compute_confidence(
+    evidence = dict(
         agrees_with_rules=agrees,
         top_retrieval_score=max(vector_scores, default=0.0),
         citation_validity=citation_validity,
         fraud_score=run.fraud.risk_score,
     )
+    confidence = compute_confidence(**evidence)
     reasons = review_reasons(
         outcome=outcome,
         fraud_level=run.fraud.risk_level,
@@ -122,6 +137,8 @@ def decide(
         ],
         dropped_citations=dropped_ids,
         confidence_score=confidence,
+        confidence_breakdown={name: round(value, 3) for name, value in confidence_components(**evidence).items()},
+        llm_outcome=run.answer.coverage_outcome if run.answer is not None else None,
         fraud_risk=run.fraud,
         coverage_rules=run.coverage,
         requires_human_review=bool(reasons),

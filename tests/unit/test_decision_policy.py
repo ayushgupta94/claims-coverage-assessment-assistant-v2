@@ -121,3 +121,17 @@ def test_confidence_is_bounded():
         compute_confidence(agrees_with_rules=False, top_retrieval_score=0.0, citation_validity=0.0, fraud_score=1.0)
         == 0.0
     )
+
+
+def test_breakdown_explains_the_confidence_and_the_llm_proposal_is_kept():
+    decision = decide_for(make_run(outcome="covered", is_covered=False, vector_score=0.8))
+
+    assert decision.llm_outcome == CoverageOutcome.COVERED  # what the model said...
+    assert decision.coverage_outcome == CoverageOutcome.NOT_COVERED  # ...and what the rules decided
+    assert decision.confidence_breakdown["rules_agreement"] == 0.0
+    assert decision.confidence_breakdown["retrieval_match"] == 0.2
+    assert abs(sum(decision.confidence_breakdown.values()) - decision.confidence_score) < 0.002
+
+
+def test_fallback_has_no_llm_outcome():
+    assert decide_for(make_run(answer=False)).llm_outcome is None

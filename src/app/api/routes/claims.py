@@ -1,8 +1,10 @@
-"""Claims API: submit a claim for assessment, read claims."""
+"""Claims API: submit a claim for assessment (202 + poll), read claims."""
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, status
+from urllib.parse import quote
+
+from fastapi import APIRouter, Depends, Response, status
 
 from app.api.deps import get_claim_service
 from app.api.security import verify_access_code
@@ -15,13 +17,15 @@ router = APIRouter(prefix="/claims", tags=["claims"], dependencies=[Depends(veri
 @router.post(
     "",
     response_model=ClaimRecord,
-    status_code=status.HTTP_201_CREATED,
-    summary="Submit a claim; the agent assesses it and it is auto-finalized or escalated to review.",
+    status_code=status.HTTP_202_ACCEPTED,
+    summary="Submit a claim. It is assessed in the background: poll the Location URL until status leaves 'submitted'.",
 )
 async def submit_claim(
-    claim: ClaimRequest, service: ClaimAssessmentService = Depends(get_claim_service)
+    claim: ClaimRequest, response: Response, service: ClaimAssessmentService = Depends(get_claim_service)
 ) -> ClaimRecord:
-    return await service.submit(claim)
+    record = await service.submit(claim)
+    response.headers["Location"] = f"/claims/{quote(claim.claim_id, safe='')}"
+    return record
 
 
 @router.get("", response_model=list[ClaimRecord], summary="List claims, newest first (e.g. ?status=under_review).")

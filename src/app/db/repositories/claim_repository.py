@@ -7,6 +7,10 @@ append-only `decision_history` audit trail.
 
     submitted -> under_review -> approved / rejected   (escalated to a human)
     submitted -> approved / rejected                   (auto-finalized)
+    submitted -> failed                                (the assessment raised)
+
+While a claim is `submitted`, the agent's tool steps are appended as they
+finish, so clients polling GET /claims/{id} can show progress.
 
 "Claim history" is a query over this same collection for other claims on
 the same policy, excluding the claim being assessed (it is persisted before
@@ -69,6 +73,26 @@ class ClaimRepository:
                 },
                 "$push": {"decision_history": {"$each": [entry.model_dump(mode="json") for entry in history]}},
             },
+        )
+
+    async def append_step(self, claim_id: str, step: ToolStep) -> None:
+        await self._claims.update_one({"claim_id": claim_id}, {"$push": {"steps": step.model_dump()}})
+
+    async def mark_failed(self, claim_id: str, entry: HistoryEntry) -> None:
+        # Only a claim still being assessed can fail; never overwrite a decision.
+        await self._claims.update_one(
+            {"claim_id": claim_id, "status": ClaimStatus.SUBMITTED.value},
+            {
+                "$set": {"status": ClaimStatus.FAILED.value},
+                "$push": {"decision_history": entry.model_dump(mode="json")},
+            },
+        )
+
+    async def requeue(self, claim_id: str, entry: HistoryEntry) -> None:
+        """Clears the partial progress of an interrupted assessment before it runs again."""
+        await self._claims.update_one(
+            {"claim_id": claim_id},
+            {"$set": {"steps": []}, "$push": {"decision_history": entry.model_dump(mode="json")}},
         )
 
     async def record_review(

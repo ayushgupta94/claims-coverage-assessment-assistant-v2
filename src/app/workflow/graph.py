@@ -34,6 +34,7 @@ from app.domain.models import (
     CoverageOutcome,
     HistoryEntry,
     ReviewRequest,
+    ToolStep,
 )
 
 logger = get_logger(__name__)
@@ -58,7 +59,17 @@ def build_claim_workflow(
     checkpointer,
 ):
     async def assess(state: ClaimState) -> ClaimState:
-        run = await orchestrator.run(ClaimRequest.model_validate(state["claim"]))
+        claim = ClaimRequest.model_validate(state["claim"])
+
+        async def publish_step(step: ToolStep) -> None:
+            # Progress for clients polling GET /claims/{id}. Best effort: the full
+            # step list is saved with the assessment in `route` anyway.
+            try:
+                await claim_repository.append_step(claim.claim_id, step)
+            except Exception:
+                logger.warning("progress_update_failed", exc_info=True)
+
+        run = await orchestrator.run(claim, on_step=publish_step)
         return {"run": run.model_dump(mode="json")}
 
     async def apply_policy(state: ClaimState) -> ClaimState:

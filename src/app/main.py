@@ -10,9 +10,12 @@ Anything can be injected (tests pass fakes / in-memory versions).
 
 from __future__ import annotations
 
+import asyncio
 from contextlib import asynccontextmanager
 from pathlib import Path
+from urllib.parse import urljoin
 
+import httpx
 from fastapi import FastAPI
 from fastapi.responses import FileResponse
 
@@ -28,6 +31,7 @@ from app.db.mongo_client import MongoDatabase
 from app.db.repositories.claim_repository import ClaimRepository
 from app.db.repositories.policy_repository import PolicyRepository
 from app.db.repositories.usage_repository import UsageRepository
+from app.domain.models import ClaimStatus
 from app.mcp_server.server import build_mcp_server
 from app.retrieval.embeddings import Embedder
 from app.retrieval.hybrid_retriever import HybridRetriever
@@ -35,6 +39,8 @@ from app.services.claim_assessment_service import ClaimAssessmentService
 from app.workflow.graph import build_claim_workflow
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
+# Under Docker's default 10s stop timeout, so the drain finishes before SIGKILL.
+_SHUTDOWN_DRAIN_SECONDS = 8
 
 logger = get_logger(__name__)
 
@@ -90,7 +96,12 @@ def create_app(
         )
         logger.info("startup_complete", extra={"ctx_environment": settings.environment})
         async with mcp_server.session_manager.run():
+            resume = asyncio.create_task(_resume_interrupted(app.state.claim_service, claim_repository, settings))
             yield
+            resume.cancel()
+            # Let running assessments finish while MCP and Mongo are still up;
+            # whatever is cut off stays `submitted` and resumes on the next start.
+            await app.state.claim_service.drain(timeout=_SHUTDOWN_DRAIN_SECONDS)
         tracing.flush()
         mongo_database.close()
         logger.info("shutdown_complete")
@@ -117,6 +128,26 @@ def create_app(
     app.include_router(reviews.router)
     app.mount("/mcp", AccessCodeMiddleware(mcp_server.streamable_http_app(), settings))
     return app
+
+
+async def _resume_interrupted(
+    service: ClaimAssessmentService, claim_repository: ClaimRepository, settings: Settings
+) -> None:
+    """Re-runs claims a restart left mid-assessment. Their agent calls this
+    app's own /mcp, so it first waits until the server accepts connections."""
+    if not await claim_repository.list_records(status=ClaimStatus.SUBMITTED, limit=1):
+        return
+    health_url = urljoin(settings.mcp_server_url, "/health/live")
+    async with httpx.AsyncClient(timeout=2) as client:
+        for _ in range(30):
+            try:
+                if (await client.get(health_url)).status_code == 200:
+                    await service.resume_interrupted()
+                    return
+            except httpx.TransportError:
+                pass
+            await asyncio.sleep(1)
+    logger.warning("resume_skipped_server_not_reachable")
 
 
 def _mongo_checkpointer(settings: Settings):

@@ -60,7 +60,12 @@ async def _no_text_search(self, query, *, product_version_id, limit):
 async def _seed(db) -> None:
     policies = PolicyRepository(db)
     await policies.upsert_product_version(
-        PolicyProductVersion(product_version_id="AUTO-GOLD-V1", product_id="AUTO-GOLD", policy_type="auto")
+        PolicyProductVersion(
+            product_version_id="AUTO-GOLD-V1",
+            product_id="AUTO-GOLD",
+            policy_type="auto",
+            covered_claim_types=["collision"],
+        )
     )
     await policies.upsert_issued_policy(
         IssuedPolicy(
@@ -133,6 +138,21 @@ def claim_payload(claim_id: str) -> dict:
     }
 
 
+def submit_and_wait(claim_id: str) -> tuple[httpx.Response, dict]:
+    """POST /claims answers 202 at once; poll the Location until the
+    background assessment leaves `submitted`."""
+    response = httpx.post(f"{BASE_URL}/claims", json=claim_payload(claim_id), headers=CODE)
+    assert response.status_code == 202, response.text
+    assert response.json()["status"] == "submitted"
+    assert response.headers["Location"] == f"/claims/{claim_id}"
+    for _ in range(300):
+        body = httpx.get(BASE_URL + response.headers["Location"], headers=CODE).json()
+        if body["status"] != "submitted":
+            return response, body
+        time.sleep(0.1)
+    raise AssertionError(f"{claim_id} was still being assessed after 30s")
+
+
 def test_requests_without_access_code_are_rejected(server):
     assert httpx.post(f"{BASE_URL}/claims", json=claim_payload("X")).status_code == 401
     assert httpx.get(f"{BASE_URL}/reviews").status_code == 401
@@ -141,10 +161,8 @@ def test_requests_without_access_code_are_rejected(server):
 
 
 def test_claim_is_assessed_end_to_end_through_real_mcp(server):
-    response = httpx.post(f"{BASE_URL}/claims", json=claim_payload("CLAIM-OK"), headers=CODE, timeout=30)
+    response, body = submit_and_wait("CLAIM-OK")
 
-    assert response.status_code == 201, response.text
-    body = response.json()
     assert body["status"] == "approved"
     assert body["decision"]["coverage_outcome"] == "covered"
     assert [c["clause_id"] for c in body["decision"]["citations"]] == ["AUTO-GOLD-V1-2.1"]
@@ -154,7 +172,7 @@ def test_claim_is_assessed_end_to_end_through_real_mcp(server):
 
 
 def test_disputed_claim_goes_to_the_review_queue_and_reviewer_resumes_it(server):
-    body = httpx.post(f"{BASE_URL}/claims", json=claim_payload("CLAIM-DISPUTED"), headers=CODE, timeout=30).json()
+    _, body = submit_and_wait("CLAIM-DISPUTED")
     assert body["status"] == "under_review"
     assert body["decision"]["coverage_outcome"] == "covered"  # rules win over the LLM
     assert "llm_contradicts_rules" in body["decision"]["review_reasons"]

@@ -130,3 +130,21 @@ async def test_frequent_claims_raise_risk_to_high(repos, settings):
 
     assert result.risk_level == FraudRiskLevel.HIGH
     assert any("claims filed on this policy" in s for s in result.signals)
+
+
+async def test_only_claims_filed_before_this_one_count_as_history(repos, settings):
+    # Claims filed later, or at the same instant (e.g. the same demo claim
+    # submitted again), must not change this claim's score.
+    policy_repo, claim_repo = repos
+    await _seed(policy_repo)
+    claim = make_claim()
+    await claim_repo.create_claim(claim)
+
+    for i, days_later in enumerate([0, 0, 30, 60]):
+        await claim_repo.create_claim(
+            make_claim(claim_id=f"LATER-{i}", amount=5_000.0, filed_at=claim.filed_at + timedelta(days=days_later))
+        )
+
+    result = await score_fraud_risk(settings, claim_repo, policy_repo, FraudRiskScoringInput(claim_id=claim.claim_id))
+
+    assert not any("claims filed on this policy" in s for s in result.signals)

@@ -1,10 +1,23 @@
-"""Agent loop: tool execution, safety nets, guardrails and fallback paths."""
+"""Agent loop: tool execution, concurrency, safety nets, guardrails and fallback paths."""
+
+import asyncio
+import json
+
+import pytest
 
 from app.agent.llm_client import LLMResponse
 from app.agent.orchestrator import ClaimAssessmentOrchestrator
-from app.core.exceptions import LLMProviderError
+from app.core.exceptions import LLMProviderError, ToolExecutionError
 from app.domain.models import CoverageOutcome
-from tests.fakes import CLEAN_TOOL_RESULTS, FakeLLM, FakeToolExecutor, final_answer, make_claim, tool_call
+from tests.fakes import (
+    CLEAN_TOOL_RESULTS,
+    FakeLLM,
+    FakeToolExecutor,
+    final_answer,
+    make_claim,
+    tool_call,
+    tool_calls,
+)
 
 
 def make_orchestrator(llm, tools: FakeToolExecutor) -> ClaimAssessmentOrchestrator:
@@ -91,3 +104,88 @@ async def test_max_iterations_stops_the_loop():
     run = await make_orchestrator(llm, FakeToolExecutor(CLEAN_TOOL_RESULTS)).run(make_claim())
     assert llm.agent_calls == 6
     assert run.used_fallback is True
+
+
+# --- concurrency -----------------------------------------------------------------
+
+
+class BarrierToolExecutor(FakeToolExecutor):
+    """Each call waits until `parties` calls have started, so a turn only
+    completes if its calls run concurrently (run serially, it times out).
+    Earlier calls then finish later, to check results still keep call order."""
+
+    def __init__(self, results_by_tool: dict[str, dict], parties: int) -> None:
+        super().__init__(results_by_tool)
+        self._parties = parties
+        self._all_started = asyncio.Event()
+
+    async def execute(self, name: str, arguments: dict) -> dict:
+        position = len(self.calls)
+        self.calls.append((name, arguments))
+        if len(self.calls) >= self._parties:
+            self._all_started.set()
+        await asyncio.wait_for(self._all_started.wait(), timeout=1)
+        await asyncio.sleep(0.01 * (self._parties - position))
+        return self._results[name]
+
+
+async def test_tool_calls_of_one_turn_run_concurrently_and_keep_call_order():
+    names = ["check_coverage_rules", "score_fraud_risk", "retrieve_policy_clauses"]
+    arguments = {"claim_id": "CLAIM-1"}
+    llm = FakeLLM([tool_calls(*[(name, arguments) for name in names]), final_answer()])
+    tools = BarrierToolExecutor(CLEAN_TOOL_RESULTS, parties=len(names))
+
+    run = await make_orchestrator(llm, tools).run(make_claim())
+
+    tool_messages = [m for m in llm.last_messages if m.role == "tool"]
+    assert [m.tool_call_id for m in tool_messages] == [f"call-{name}" for name in names]
+    assert [json.loads(m.content) for m in tool_messages] == [CLEAN_TOOL_RESULTS[name] for name in names]
+    assert all(step.ok for step in run.steps)
+    # Every call started before the first one finished.
+    first_finish = min(step.started_ms + step.latency_ms for step in run.steps)
+    assert all(step.started_ms <= first_finish for step in run.steps)
+    assert run.used_fallback is False
+
+
+class ClassifierWaitsForAgentLLM(FakeLLM):
+    """The classifier only answers once the agent loop has made its first LLM
+    call, so the run only completes if the two run concurrently. With
+    unblock_classifier=False it hangs until cancelled (or a 1s safety timeout)."""
+
+    def __init__(self, script, *, unblock_classifier: bool = True, **kwargs) -> None:
+        super().__init__(script, **kwargs)
+        self._unblock_classifier = unblock_classifier
+        self.agent_started = asyncio.Event()
+        self.classifier_cancelled = False
+
+    async def generate(self, messages, *, tools=None, response_format=None, purpose="agent"):
+        if purpose == "injection_classifier":
+            try:
+                await asyncio.wait_for(self.agent_started.wait(), timeout=1)
+            except asyncio.CancelledError:
+                self.classifier_cancelled = True
+                raise
+        elif self._unblock_classifier:
+            self.agent_started.set()
+        return await super().generate(messages, tools=tools, response_format=response_format, purpose=purpose)
+
+
+async def test_injection_classifier_runs_alongside_the_agent_loop():
+    llm = ClassifierWaitsForAgentLLM([final_answer()], injection_verdict=True)
+    run = await make_orchestrator(llm, FakeToolExecutor(CLEAN_TOOL_RESULTS)).run(make_claim())
+
+    assert run.guardrail_flags[0] == "injection_suspected"
+    assert run.usage.llm_calls == 2  # agent + classifier
+
+
+async def test_classifier_is_cancelled_when_the_agent_loop_fails():
+    class BrokenTools(FakeToolExecutor):
+        async def execute(self, name: str, arguments: dict) -> dict:
+            await asyncio.sleep(0.01)  # like real I/O: lets the classifier start first
+            raise ToolExecutionError(name, "down")
+
+    llm = ClassifierWaitsForAgentLLM([final_answer()], unblock_classifier=False)
+    with pytest.raises(ToolExecutionError):
+        await make_orchestrator(llm, BrokenTools({})).run(make_claim())
+    await asyncio.sleep(0)  # let the cancellation reach the task
+    assert llm.classifier_cancelled is True

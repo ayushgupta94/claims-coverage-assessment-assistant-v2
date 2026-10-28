@@ -34,6 +34,7 @@ are authoritative: never contradict the coverage rules result.
 - Call retrieve_policy_clauses (with the claim's policy_id) to find the policy \
 wording that applies, and cite clause_ids from its results only.
 - Optionally call lookup_claim_history for context.
+- These tools don't depend on each other: request them together in one turn.
 - Then give the final answer:
   - coverage_outcome: "covered", "partially_covered" (only part of the amount \
 or loss is covered) or "not_covered".

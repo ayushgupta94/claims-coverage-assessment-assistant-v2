@@ -27,13 +27,13 @@ jobs:
       - run: uv run ruff format --check src tests evals scripts
       - run: uv run pytest -q
 
-  deploy:
-    needs: test
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-    runs-on: ubuntu-latest
-    steps:
-      - name: Trigger Render deploy
-        run: curl --fail --silent --show-error -X POST "${{ secrets.RENDER_DEPLOY_HOOK_URL }}"
+  # deploy:
+  #   needs: test
+  #   if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - name: Trigger Render deploy
+  #       run: curl --fail --silent --show-error -X POST "${{ secrets.RENDER_DEPLOY_HOOK_URL }}"
 
   eval:
     needs: test
